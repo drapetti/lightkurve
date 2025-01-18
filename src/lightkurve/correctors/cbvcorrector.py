@@ -31,8 +31,6 @@ from ..search import search_lightcurve
 from .regressioncorrector import RegressionCorrector
 from ..collections import LightCurveCollection
 from .metrics import overfit_metric_lombscargle, underfit_metric_neighbors, MinTargetsError
-from ..io.tess import get_tess_cadence_type
-from ..io.kepler import get_kepler_cadence_type
 
 
 log = logging.getLogger(__name__)
@@ -49,9 +47,7 @@ class CBVCorrector(RegressionCorrector):
     from Kepler/K2/TESS.
 
     On construction of this object, the relevant CBVs will be downloaded from
-    MAST appropriate for the light curve cadence type passed to the constructor.
-    If the lc.meta["CADENCE_TYPE"] is not available then the cadence length is 
-    determined by the time interval between cadences in the lc.time array. 
+    MAST appropriate for the lightcurve object passed to the constructor.
 
     For TESS there are multiple CBV types. All are loaded and the user must
     specify which to use in the correction.
@@ -140,16 +136,11 @@ class CBVCorrector(RegressionCorrector):
         # Call the RegresssionCorrector Constructor
         super(CBVCorrector, self).__init__(lc)
 
-        if not hasattr(self.lc, 'targetid'):
-            self.lc.targetid = np.NaN
-
         #***
         # Retrieve all relevant CBVs from either MAST or a local directory
         cbvs = []
 
         if (not do_not_load_cbvs):
-            exptime = _determine_exptime_from_lc(self.lc)
-
             if self.lc.mission == 'Kepler':
                 cbvs.append(load_kepler_cbvs(cbv_dir=cbv_dir,mission=self.lc.mission, quarter=self.lc.quarter,
                         channel=self.lc.channel))
@@ -160,7 +151,7 @@ class CBVCorrector(RegressionCorrector):
                 # For TESS we load multiple CBV types
                 # Single-Scale
                 cbvs.append(load_tess_cbvs(cbv_dir=cbv_dir,sector=self.lc.sector,
-                    camera=self.lc.camera, ccd=self.lc.ccd, cbv_type='SingleScale', exptime=exptime))
+                    camera=self.lc.camera, ccd=self.lc.ccd, cbv_type='SingleScale'))
             
                 # Multi-Scale
                 # Although there has always been 3 bands, there could be more,
@@ -171,7 +162,7 @@ class CBVCorrector(RegressionCorrector):
                     iBand += 1
                     cbvObj = load_tess_cbvs(cbv_dir=cbv_dir,sector=self.lc.sector,
                         camera=self.lc.camera, ccd=self.lc.ccd, cbv_type='MultiScale',
-                        band=iBand, exptime=exptime)
+                        band=iBand)
                     if (cbvObj.band == iBand):
                         cbvs.append(cbvObj)
                     else:
@@ -179,7 +170,7 @@ class CBVCorrector(RegressionCorrector):
             
                 # Spike
                 cbvs.append(load_tess_cbvs(cbv_dir=cbv_dir,sector=self.lc.sector,
-                    camera=self.lc.camera, ccd=self.lc.ccd, cbv_type='Spike', exptime=exptime))
+                    camera=self.lc.camera, ccd=self.lc.ccd, cbv_type='Spike'))
             
             else:
                 raise ValueError('Unknown mission type')
@@ -1015,7 +1006,7 @@ class CotrendingBasisVectors(TimeSeries):
     ----------
     cadenceno       : int array-like
         Cadence indices
-    time            : float array-like
+    time            : flaot array-like
         CBV cadence times
     gap_indicators  : bool array-like
         True => cadence is gapped
@@ -1415,14 +1406,6 @@ class KeplerCotrendingBasisVectors(CotrendingBasisVectors):
         super(KeplerCotrendingBasisVectors, self).__init__(data=data,
                 time=time, **kwargs)
 
-        # The cadence type or exposure time is not in the CBVS FITs header.
-        # We need to derive the cadence type from the time array
-        if time is not None:
-            cadence_len = np.nanmedian(np.diff(time.unix))
-            cadence_type = get_kepler_cadence_type(cadence_len)
-            self.meta["EXPTIME"] = cadence_len
-            self.meta["CADENCE_TYPE"] = cadence_type
-
     @classmethod
     def from_hdu(self, hdu=None, module=None, output=None,
             **kwargs):
@@ -1549,22 +1532,14 @@ class KeplerCotrendingBasisVectors(CotrendingBasisVectors):
     def output(self, output):
         self.meta['OUTPUT'] = output
 
-    @property
-    def cadence_type(self):
-        return self.meta.get('CADENCE_TYPE', None)
-
-    @cadence_type.setter
-    def cadence_type(self, cadence_type):
-        self.meta['CADENCE_TYPE'] = cadence_type
-
     def __repr__(self):
 
         if self.mission == 'Kepler':
-            repr_string = 'Kepler CBVs, Cadence Type : {}, Quarter.Module.Output : {}.{}.{}, nCBVs : {}'\
-                ''.format(self.cadence_type, self.quarter, self.module, self.output, len(self.cbv_indices))
+            repr_string = 'Kepler CBVs, Quarter.Module.Output : {}.{}.{}, nCBVs : {}'\
+                ''.format(self.quarter, self.module, self.output, len(self.cbv_indices))
         elif self.mission == 'K2':
-            repr_string = 'K2 CBVs, Cadence Type : {}, Campaign.Module.Output : {}.{}.{}, nCBVs : {}'\
-                ''.format(self.cadence_type, self.campaign, self.module, self.output, len(self.cbv_indices))
+            repr_string = 'K2 CBVs, Campaign.Module.Output : {}.{}.{}, nCBVs : {}'\
+                ''.format( self.campaign, self.module, self.output, len(self.cbv_indices))
 
         return repr_string
 
@@ -1601,15 +1576,6 @@ class TessCotrendingBasisVectors(CotrendingBasisVectors):
         # Initialize attributes common to all CotrendingBasisVector classes
         super(TessCotrendingBasisVectors, self).__init__(data=data,
                 time=time, **kwargs)
-
-        # The cadence type or exposure time is not in the CBVS FITs header.
-        # We need to derive the cadence type from the time array
-        if time is not None:
-            cadence_len = np.nanmedian(np.diff(time.unix))
-            cadence_type = get_tess_cadence_type(cadence_len)
-            self.meta["EXPTIME"] = cadence_len
-            self.meta["CADENCE_TYPE"] = cadence_type
-
 
     @classmethod
     def from_hdu(self, hdu=None, cbv_type=None, band=None, **kwargs):
@@ -1742,28 +1708,25 @@ class TessCotrendingBasisVectors(CotrendingBasisVectors):
     def ccd(self, ccd):
         self.meta['CCD'] = ccd
 
-    @property
-    def cadence_type(self):
-        return self.meta.get('CADENCE_TYPE', None)
-
-    @cadence_type.setter
-    def cadence_type(self, cadence_type):
-        self.meta['CADENCE_TYPE'] = cadence_type
-
     def __repr__(self):
 
         if (self.cbv_type == 'MultiScale'):
-            repr_string = 'TESS CBVs, Cadence Type : {}, Sector.Camera.CCD : {}.{}.{}, CBVType.Band: {}.{}, nCBVs : {}' \
-                ''.format(self.cadence_type, self.sector, self.camera, self.ccd, self.cbv_type,
+            repr_string = 'TESS CBVs, Sector.Camera.CCD : {}.{}.{}, CBVType.Band: {}.{}, nCBVs : {}' \
+                ''.format(self.sector, self.camera, self.ccd, self.cbv_type,
                     self.band, len(self.cbv_indices))
         else:
-            repr_string = 'TESS CBVs, Cadence Type : {}, Sector.Camera.CCD : {}.{}.{}, CBVType : {}, nCBVS : {}'\
-                ''.format(self.cadence_type, self.sector, self.camera, self.ccd, self.cbv_type, len(self.cbv_indices))
+            repr_string = 'TESS CBVs, Sector.Camera.CCD : {}.{}.{}, CBVType : {}, nCBVS : {}'\
+                ''.format(self.sector, self.camera, self.ccd, self.cbv_type, len(self.cbv_indices))
 
         return repr_string
 
 #*******************************************************************************
 # Functions
+
+
+
+
+
 
 @deprecated("2.1", alternative="load_kepler_cbvs", warning_type=LightkurveDeprecationWarning)
 def download_kepler_cbvs(*args, **kwargs):
@@ -1784,8 +1747,6 @@ def load_kepler_cbvs(cbv_dir=None,mission=None, quarter=None, campaign=None,
     quarter/campaign.
 
     For Kepler this extracts the DR25 CBVs.
-
-    Only long (30-minute) cadence CBVs are available for Kepler and K2. 
 
     Parameters
     ----------
@@ -1876,7 +1837,7 @@ def download_tess_cbvs(*args, **kwargs):
 
 
 def load_tess_cbvs(cbv_dir=None,sector=None, camera=None,
-        ccd=None, cbv_type='SingleScale', band=None, exptime='short'):
+        ccd=None, cbv_type='SingleScale', band=None):
     """Loads TESS cotrending basis vectors, either from a directory of 
     CBV files already saved locally if cbv_dir is passed, or else 
     will retrieve the relevant files programmatically from MAST. 
@@ -1884,9 +1845,11 @@ def load_tess_cbvs(cbv_dir=None,sector=None, camera=None,
     This function fetches the Cotrending Basis Vectors FITS HDU for the desired
     cotrending basis vectors.
 
-    For TESS, each CCD CBVs are stored in a separate FITS file.
+    For TESS, each CCD CBVs are stored in a separate FITS files.
 
-    This function will load either 'short' 2-minute or 'fast' 20-second CBVs.
+    For now, this function will only load 2-minute cadence CBVs. Once other
+    cadence CBVs become available this function will be updated to support
+    their downloads.
 
     Parameters
     ----------
@@ -1900,13 +1863,6 @@ def load_tess_cbvs(cbv_dir=None,sector=None, camera=None,
         'SingleScale' or 'MultiScale' or 'Spike'
     band : int
         Multi-scale band number
-    exptime : 'ffi', 'short', 'fast', or float
-        'ffi' selects 10-min and 30-min cadence FFI products;
-        'short' selects 2-min products;
-        'fast' selects 20-sec products.
-        Alternatively, you can pass the exact exposure time in seconds as
-        an int or a float, e.g., ``exptime=600`` selects 10-minute cadence.
-        By default, 2-min is returned.
 
     Returns
     -------
@@ -1949,23 +1905,14 @@ def load_tess_cbvs(cbv_dir=None,sector=None, camera=None,
 
     # This is the string to search for in the curl script file
     # Pad the sector number with a first '0' if less than 10
+    # TODO: figure out a way to pad an integer number with forward zeros
+    # without needing a conditional
     sector = int(sector)
+
     try:
         SearchString = 's%04d-%s-%s-' % (sector, str(camera),str(ccd))
     except:
         raise Exception('Error parsing sector string when getting TESS CBV FITS files')
-
-    # Get cadence type
-    cadence_type = get_tess_cadence_type(exptime)
-    if cadence_type == 'ffi':
-        raise Exception('load_tess_cbvs does not yet handle FFI cadence CBVs.')
-        cbv_cadence_str = 'FTL'
-    elif cadence_type == 'short':
-        cbv_cadence_str = ''
-    elif cadence_type == 'fast':
-        cbv_cadence_str = 'fast-'
-    else:
-        raise Exception('Unknown cadence "{}"'.format(cadence_type))
 
     try:
         if cbv_dir is not None:
@@ -1987,8 +1934,8 @@ def load_tess_cbvs(cbv_dir=None,sector=None, camera=None,
 
         else:
             curlBaseUrl = 'https://archive.stsci.edu/missions/tess/download_scripts/sector/tesscurl_sector_'
-            curlEndUrl = 'cbv.sh'
-            curlUrl = curlBaseUrl + str(sector) + '_' + cbv_cadence_str + curlEndUrl
+            curlEndUrl = '_cbv.sh'
+            curlUrl = curlBaseUrl + str(sector) + curlEndUrl
 
             # This is the string to search for in the curl script file
 
@@ -2020,46 +1967,3 @@ def load_tess_cbvs(cbv_dir=None,sector=None, camera=None,
 
     except:
         raise Exception('CBVS were not found')
-
-def _determine_exptime_from_lc(lc):
-    """ Determiens the exposure time 'exptime' based on the information in the 
-    light curve object.
-
-    if lc.meta['CADENCE_TYPE'] exists then that value is used.
-
-    Otherwise, the cadence type is determined from the median cadence length.
-    This latter method requires lc.mission to be set (because the cadence type 
-    is dependent on the mission)
-
-    Parameters
-    ----------
-    lc  : LightCurve
-        The light curve to correct
-
-    Returns
-    -------
-    exptime : str
-        one of: ('ffi', 'short', 'fast') for TESS or 
-                ('ffi', 'long', 'short') for Kepler/K2
-    """
-    # Determine the cadence type (exposure time) for this light curve
-    # Cadence type is not necessarily available if this is a custom light curve
-    exptime = lc.meta.get('CADENCE_TYPE')
-    if exptime is None:
-        # CADENCE_TYPE is not in the light curve. Attempt to measure the cadence type.
-        # We need to derive the cadence type from the time array
-        cadence_len = np.nanmedian(np.diff(lc.time.unix))
-        if hasattr(lc, 'mission'):
-            if lc.mission == 'TESS':
-                exptime = get_tess_cadence_type(cadence_len)
-                # FFI cadence TESS CBVs not yet suppored, load short cadence
-                if exptime == 'ffi':
-                    exptime = 'short'
-            else:
-                exptime = get_kepler_cadence_type(cadence_len)
-        else:
-            # No clue what data this is
-            raise Exception('LightCurve object must contain meta keyword' + \
-                    '"mission" in order to determine cadence type')
-
-    return exptime
