@@ -1971,7 +1971,7 @@ def load_tess_cbvs(cbv_dir=None,sector=None, camera=None,
         if cbv_dir is not None:
             # Read in the relevant curl script file and find the line for the CBV
             # data we are looking for
-            data = glob.glob(os.path.join(cbv_dir,'*.fits'))
+            data = glob.glob(os.path.join(cbv_dir,f"*{cbv_cadence_str}cbv.fits"))
             fname = None
             for line in data:
                 strLine = str(line)
